@@ -1,28 +1,35 @@
 #!/bin/bash
-SD_PATH=~octoprint/.octoprint/uploads
-cat ${2} > /tmp/plrtmpA.$$
-cat /tmp/plrtmpA.$$ | sed -e '1,/Z'${1}'/ d' | sed -ne '/ Z/,$ p' | grep -m 1 ' Z' | sed -ne 's/.* Z\([^ ]*\)/SET_KINEMATIC_POSITION Z=\1/p' > ${SD_PATH}/plr.gcode
-echo 'G91' >> ${SD_PATH}/plr.gcode
-echo 'G1 Z5' >> ${SD_PATH}/plr.gcode
-echo 'G90' >> ${SD_PATH}/plr.gcode
-echo 'G28 X Y' >> ${SD_PATH}/plr.gcode
-echo 'START_TEMPS' >> ${SD_PATH}/plr.gcode
-cat /tmp/plrtmpA.$$ | sed '/ Z'${1}'/q' | sed -ne '/\(M104\|M140\|M109\|M190\|M106\)/p' >> ${SD_PATH}/plr.gcode
-cat /tmp/plrtmpA.$$ | sed -ne '/;End of Gcode/,$ p' | tr '\n' ' ' | sed -ne 's/ ;[^ ]* //gp' | sed -ne 's/\\\\n/;/gp' | tr ';' '\n' | grep material_bed_temperature | sed -ne 's/.* = /M140 S/p' | head -1 >> ${SD_PATH}/plr.gcode
-cat /tmp/plrtmpA.$$ | sed -ne '/;End of Gcode/,$ p' | tr '\n' ' ' | sed -ne 's/ ;[^ ]* //gp' | sed -ne 's/\\\\n/;/gp' | tr ';' '\n' | grep material_print_temperature | sed -ne 's/.* = /M104 S/p' | head -1 >> ${SD_PATH}/plr.gcode
-cat /tmp/plrtmpA.$$ | sed -ne '/;End of Gcode/,$ p' | tr '\n' ' ' | sed -ne 's/ ;[^ ]* //gp' | sed -ne 's/\\\\n/;/gp' | tr ';' '\n' | grep material_bed_temperature | sed -ne 's/.* = /M190 S/p' | head -1 >> ${SD_PATH}/plr.gcode
-cat /tmp/plrtmpA.$$ | sed -ne '/;End of Gcode/,$ p' | tr '\n' ' ' | sed -ne 's/ ;[^ ]* //gp' | sed -ne 's/\\\\n/;/gp' | tr ';' '\n' | grep material_print_temperature | sed -ne 's/.* = /M109 S/p' | head -1 >> ${SD_PATH}/plr.gcode
-# cat /tmp/plrtmpA.$$ | sed -e '1,/ Z'${1}'[^0-9]*$/ d' | sed -e '/ Z/q' | tac | grep -m 1 ' E' | sed -ne 's/.* E\([^ ]*\)/G92 E\1/p' >> ${SD_PATH}/plr.gcode
-#tac /tmp/plrtmpA.$$ | sed -e '/ Z'${1}'[^0-9]*$/q' | tac | tail -n+2 | sed -e '/ Z[0-9]/ q' | tac | sed -e '/ E[0-9]/ q' | sed -ne 's/.* E\([^ ]*\)/G92 E\1/p' >> ${SD_PATH}/plr.gcode
-BG_EX=`tac /tmp/plrtmpA.$$ | sed -e '/ Z'${1}'[^0-9]*$/q' | tac | tail -n+2 | sed -e '/ Z[0-9]/ q' | tac | sed -e '/ E[0-9]/ q' | sed -ne 's/.* E\([^ ]*\)/G92 E\1/p'`
-# If we failed to match an extrusion command (allowing us to correctly set the E axis) prior to the matched layer height, then simply set the E axis to the first E value present in the resemued gcode.  This avoids extruding a huge blod on resume, and/or max extrusion errors.
-if [ "${BG_EX}" = "" ]; then
- BG_EX=`tac /tmp/plrtmpA.$$ | sed -e '/ Z'${1}'[^0-9]*$/q' | tac | tail -n+2 | sed -ne '/ Z/,$ p' | sed -e '/ E[0-9]/ q' | sed -ne 's/.* E\([^ ]*\)/G92 E\1/p'`
-fi
-echo ${BG_EX} >> ${SD_PATH}/plr.gcode
-echo 'G91' >> ${SD_PATH}/plr.gcode
-echo 'G1 Z-5' >> ${SD_PATH}/plr.gcode
-echo 'G90' >> ${SD_PATH}/plr.gcode
-# cat /tmp/plrtmpA.$$ | sed -e '1,/Z'${1}'/ d' | sed -ne '/ Z/,$ p' >> ${SD_PATH}/plr.gcode
-tac /tmp/plrtmpA.$$ | sed -e '/ Z'${1}'[^0-9]*$/q' | tac | tail -n+2 | sed -ne '/ Z/,$ p' >> ${SD_PATH}/plr.gcode
-rm /tmp/plrtmpA.$$
+SD_PATH=~/printer_data/gcodes
+file_old=${SD_PATH}/${2}
+file_new="back_${2}"
+a=$(echo "${1} + 5" | bc)
+new="${SD_PATH}/${file_new}"
+
+# Parámetros dinámicos para X e Y
+x_target=$3
+y_target=$4
+
+# Altura nueva
+echo 'SET_KINEMATIC_POSITION Z='${1} > "${new}"
+cat "${file_old}" | grep "^M190 S*" | tail -n 1 >> "${new}"
+echo 'G91' >> "${new}"
+echo 'G1 Z'${a} >> "${new}"
+echo 'G90' >> "${new}"
+echo 'G28 X Y' >> "${new}"
+cat "${file_old}" | grep "^M104 S*" | tac | sed -n '2p' >> "${new}"
+cat "${file_old}" | grep "^M109 S*" | tail -n 1 >> "${new}"
+echo 'G21' >> "${new}"
+echo 'G90' >> "${new}"
+echo 'M83' >> "${new}"
+echo 'M107' >> "${new}"
+echo ';###################' >> "${new}"
+echo ';###################' >> "${new}"
+echo ';##### inicio ######' >> "${new}"
+echo ';###################' >> "${new}"
+echo 'G1 Z'${1} >> "${new}"
+# Buscar el patrón dinámico y copiar desde la primera coincidencia con X e Y dadas
+awk -v z=";Z:$1" '$0 ~ z {flag=1} flag' "${file_old}" >"borrar.txt"
+awk -v x=${x_target} -v y=${y_target} '$0 ~ "G1 X"x" Y"y {found=1} found' borrar.txt >>${new}
+
+# Confirmar al usuario
+echo "Contenido copiado desde la línea con G1 X${x_target} Y${y_target} hacia abajo en ${new}"
